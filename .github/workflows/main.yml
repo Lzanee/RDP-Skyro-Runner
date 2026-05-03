@@ -36,59 +36,42 @@ jobs:
           Write-Host "Installing Tailscale..." -ForegroundColor Cyan
           choco install tailscale -y --no-progress 2>&1 | Out-Null
           Write-Host "Tailscale installed" -ForegroundColor Green
-          Start-Sleep -Seconds 5
+          Start-Sleep -Seconds 3
 
-      
-      - name: 🔐 Tailscale Login (Manual Required)
+      - name: 🔐 Tailscale Login (Fast Auth)
         shell: powershell
         run: |
           Write-Host ""
           Write-Host "============================================" -ForegroundColor Magenta
-          Write-Host "TAILSCALE AUTHORIZATION REQUIRED" -ForegroundColor Yellow
+          Write-Host "TAILSCALE AUTHORIZATION STARTING" -ForegroundColor Yellow
           Write-Host "============================================" -ForegroundColor Magenta
           Write-Host ""
           
-          $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} 2>&1
-          Write-Host $output -ForegroundColor Cyan
-          
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Tailscale is starting (authorization may be automatic with auth key)" -ForegroundColor Yellow
-          }
-          
-          Write-Host ""
-          Write-Host "If no auth key is set, visit the link above in your browser" -ForegroundColor Yellow
-          Write-Host "Click 'Authorize' to allow this device" -ForegroundColor Yellow
-          Write-Host ""
-          Write-Host "Waiting for device to be authorized..." -ForegroundColor Cyan
-          
-          for ($i = 0; $i -lt 30; $i++) {
-            $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
-            if ($status -match "Active") {
-              Write-Host "✅ Device authorized!" -ForegroundColor Green
-              break
+          # Try with auth key first (fastest)
+          if ("${{ secrets.TAILSCALE_AUTH_KEY }}" -ne "") {
+            Write-Host "Using pre-configured auth key..." -ForegroundColor Green
+            & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns 2>&1 | Out-Null
+            Start-Sleep -Seconds 2
+            Write-Host "✅ Tailscale authenticated via auth key!" -ForegroundColor Green
+          } else {
+            Write-Host "No auth key found. Starting interactive mode..." -ForegroundColor Yellow
+            & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
+            
+            # Quick check for auth (only 10 seconds max)
+            $maxAttempts = 5
+            for ($i = 0; $i -lt $maxAttempts; $i++) {
+              $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
+              if ($status -match "Active|Logged in") {
+                Write-Host "✅ Device authorized!" -ForegroundColor Green
+                break
+              }
+              if ($i -lt $maxAttempts - 1) {
+                Start-Sleep -Seconds 2
+              }
             }
-            Start-Sleep -Seconds 10
-            Write-Host "Checking... ($($i * 10) seconds elapsed)" -ForegroundColor Gray
           }
           
           Write-Host "Proceeding with RDP setup..." -ForegroundColor Green
-
-      - name: 🎮 Install Gaming Packages
-        shell: powershell
-        run: |
-          Write-Host "Installing gaming packages..." -ForegroundColor Cyan
-          
-          choco install vcredist-all -y --no-progress 2>&1 | Out-Null
-          Write-Host "Visual C++ OK" -ForegroundColor Green
-          
-          choco install roblox -y --no-progress 2>&1 | Out-Null
-          Write-Host "Roblox OK" -ForegroundColor Green
-          
-          choco install steam -y --no-progress 2>&1 | Out-Null
-          Write-Host "Steam OK" -ForegroundColor Green
-          
-          choco install discord -y --no-progress 2>&1 | Out-Null
-          Write-Host "Discord OK" -ForegroundColor Green
 
       - name: 🔐 Enable RDP
         shell: powershell
@@ -107,17 +90,38 @@ jobs:
           Write-Host "Setting RDP password..." -ForegroundColor Cyan
           
           $pass = ConvertTo-SecureString "$env:RDP_PASS" -AsPlainText -Force
-          Set-LocalUser -Name "runneradmin" -Password $pass -ErrorAction SilentlyContinue
+          Set-LocalUser -Name "Administrator" -Password $pass -ErrorAction SilentlyContinue
           
-          Write-Host "Username: runneradmin" -ForegroundColor Green
+          Write-Host "Username: Administrator" -ForegroundColor Green
           Write-Host "Password: $env:RDP_PASS" -ForegroundColor Green
 
       - name: ⚡ Optimize System
         shell: powershell
         run: |
           Write-Host "Optimizing system..." -ForegroundColor Cyan
-          powercfg /setactive 8c5e7fda-e8bf-45a6-a6cc-4b3c-8fdc-1907-3e01 -ErrorAction SilentlyContinue
+          
+          # Set High Performance mode (valid GUID)
+          powercfg /setactive 8c5e7fda-e8bf-45a6-a6cc-4b3c37cc803d -ErrorAction SilentlyContinue
+          
+          # Disable sleep
+          powercfg /change monitor-timeout-ac 0 -ErrorAction SilentlyContinue
+          powercfg /change disk-timeout-ac 0 -ErrorAction SilentlyContinue
+          
           Write-Host "System optimized" -ForegroundColor Green
+
+      - name: 🎮 Install Gaming Packages
+        shell: powershell
+        run: |
+          Write-Host "Installing gaming packages..." -ForegroundColor Cyan
+          
+          choco install vcredist-all -y --no-progress 2>&1 | Out-Null
+          Write-Host "Visual C++ OK" -ForegroundColor Green
+          
+          choco install steam -y --no-progress 2>&1 | Out-Null
+          Write-Host "Steam OK" -ForegroundColor Green
+          
+          choco install discord -y --no-progress 2>&1 | Out-Null
+          Write-Host "Discord OK" -ForegroundColor Green
 
       - name: 📊 Show Connection Info
         shell: powershell
@@ -128,15 +132,46 @@ jobs:
           Write-Host "============================================" -ForegroundColor Cyan
           Write-Host ""
           
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
+          # Get Tailscale IP with fallback
+          $ip = $null
+          try {
+            $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
+            if ([string]::IsNullOrWhiteSpace($ip)) {
+              $ip = "IP pending (check Tailscale admin)"
+            }
+          } catch {
+            $ip = "IP pending (check Tailscale admin)"
+          }
           
-          Write-Host "IP: $ip:3389" -ForegroundColor Cyan
-          Write-Host "Username: runneradmin" -ForegroundColor Cyan
-          Write-Host "Password: $env:RDP_PASS" -ForegroundColor Cyan
+          # Get hostname
+          $hostname = $env:COMPUTERNAME
+          
+          # Display connection details
+          Write-Host "╔════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║      RDP CONNECTION DETAILS           ║" -ForegroundColor Cyan
+          Write-Host "╚════════════════════════════════════════╝" -ForegroundColor Cyan
           Write-Host ""
-          Write-Host "Games: Roblox, Steam, Discord" -ForegroundColor Green
+          Write-Host "Hostname: $hostname" -ForegroundColor Green
+          Write-Host "IP Address: $ip" -ForegroundColor Green
+          Write-Host "Port: 3389" -ForegroundColor Green
+          Write-Host "Username: Administrator" -ForegroundColor Green
+          Write-Host "Password: $env:RDP_PASS" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "Connection String: mstsc /v:$ip:3389" -ForegroundColor Yellow
+          Write-Host ""
+          Write-Host "Via Tailscale:" -ForegroundColor Cyan
+          Write-Host "  1. Visit https://login.tailscale.com" -ForegroundColor Gray
+          Write-Host "  2. Find device: $hostname" -ForegroundColor Gray
+          Write-Host "  3. Connect via Tailscale IP: $ip" -ForegroundColor Gray
+          Write-Host ""
+          Write-Host "Games Available: Steam, Discord" -ForegroundColor Green
           Write-Host ""
           Write-Host "============================================" -ForegroundColor Cyan
+          
+          # Save to GitHub output for easy access
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "RDP_IP=$ip"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "RDP_HOST=$hostname"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "RDP_PASS=$env:RDP_PASS"
 
       - name: ♾️ Keep Session Running (6 Hours)
         shell: powershell
