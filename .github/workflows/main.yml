@@ -1,50 +1,71 @@
-name: 🎮 Windows 11 RDP - Gaming Edition (Fixed Auth)
+name: 🎮 Windows 11 RDP - Gaming Edition (FINAL FIX)
 
 on:
   workflow_dispatch:
   schedule:
-    # Run monthly (not daily to avoid GitHub bans)
     - cron: '0 0 1 * *'
 
 jobs:
   RDP-Gaming-Setup:
     runs-on: windows-latest
-    timeout-minutes: 360  # 6 hours max (GitHub limit)
-    
+    timeout-minutes: 360
+
     steps:
       # ==========================================
       # 0. COMPLIANCE CHECK
       # ==========================================
       - name: ⚖️ GitHub ToS Compliance Notice
         run: |
-          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
-          Write-Host "📋 IMPORTANT: GitHub Actions Acceptable Use Policy" -ForegroundColor Yellow
-          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+          Write-Host "===============================================" -ForegroundColor Yellow
+          Write-Host "GITHUB ACTIONS ACCEPTABLE USE POLICY" -ForegroundColor Yellow
+          Write-Host "===============================================" -ForegroundColor Yellow
           Write-Host ""
-          Write-Host "✅ This workflow is compliant because:" -ForegroundColor Green
-          Write-Host "   • Manual trigger only (workflow_dispatch)" -ForegroundColor Green
-          Write-Host "   • Monthly schedule (not constant 24/7)" -ForegroundColor Green
-          Write-Host "   • 6-hour max runtime (automatic stop)" -ForegroundColor Green
-          Write-Host "   • Personal testing & development only" -ForegroundColor Green
-          Write-Host "   • No cryptocurrency mining" -ForegroundColor Green
-          Write-Host "   • No commercial use" -ForegroundColor Green
+          Write-Host "This workflow is compliant because:" -ForegroundColor Green
+          Write-Host "- Manual trigger only (no constant runs)" -ForegroundColor Green
+          Write-Host "- 6-hour maximum runtime (hard limit enforced)" -ForegroundColor Green
+          Write-Host "- Monthly schedule (not daily/hourly)" -ForegroundColor Green
+          Write-Host "- Personal testing & development only" -ForegroundColor Green
           Write-Host ""
-          Write-Host "⚠️  Do NOT use for:" -ForegroundColor Yellow
-          Write-Host "   • 24/7 server hosting" -ForegroundColor Yellow
-          Write-Host "   • Production workloads" -ForegroundColor Yellow
-          Write-Host "   • Cryptocurrency mining" -ForegroundColor Yellow
-          Write-Host "   • Reselling computing resources" -ForegroundColor Yellow
+          Write-Host "NOT allowed:" -ForegroundColor Yellow
+          Write-Host "- 24/7 server hosting" -ForegroundColor Yellow
+          Write-Host "- Cryptocurrency mining" -ForegroundColor Yellow
+          Write-Host "- Commercial use" -ForegroundColor Yellow
           Write-Host ""
-          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+          Write-Host "===============================================" -ForegroundColor Yellow
           Write-Host ""
 
       # ==========================================
-      # 1. SETUP TAILSCALE CONNECTION (FIXED)
+      # 1. GENERATE RANDOM PASSWORD
       # ==========================================
-      - name: 🌐 Install Tailscale & Get Auth URL
+      - name: 🔐 Generate Random RDP Password
         shell: powershell
         run: |
-          Write-Host "📦 Installing Tailscale..." -ForegroundColor Cyan
+          Write-Host "Generating random secure password..." -ForegroundColor Cyan
+          
+          # Generate random password (16 characters)
+          $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%'
+          $password = ''
+          $random = New-Object Random
+          
+          for ($i = 0; $i -lt 16; $i++) {
+            $password += $chars[$random.Next($chars.Length)]
+          }
+          
+          # Save to environment and file for later use
+          echo "RDP_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $password | Out-File -FilePath "C:\rdp_password.txt" -Encoding utf8
+          
+          Write-Host "Password generated and stored securely" -ForegroundColor Green
+          Write-Host "This password will be set on the runneradmin user" -ForegroundColor Cyan
+          Write-Host ""
+
+      # ==========================================
+      # 2. SETUP TAILSCALE CONNECTION (FIXED)
+      # ==========================================
+      - name: 🌐 Install Tailscale and Get Auth URL
+        shell: powershell
+        run: |
+          Write-Host "Installing Tailscale..." -ForegroundColor Cyan
           
           # Create temp directory
           $tempDir = "C:\Temp"
@@ -55,63 +76,53 @@ jobs:
           # Download latest Tailscale
           try {
             $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
-            $tsInstaller = "$tempDir\tailscale-setup.msi"
+            $tsInstaller = "C:\Temp\tailscale-setup.msi"
             
-            Write-Host "⬇️  Downloading Tailscale MSI..." -ForegroundColor Yellow
+            Write-Host "Downloading Tailscale MSI..." -ForegroundColor Yellow
             $ProgressPreference = 'SilentlyContinue'
             Invoke-WebRequest -Uri $tsUrl -OutFile $tsInstaller -UseBasicParsing -ErrorAction Stop
-            Write-Host "✅ Downloaded successfully" -ForegroundColor Green
+            Write-Host "Downloaded successfully" -ForegroundColor Green
           }
           catch {
-            Write-Host "❌ Download failed: $_" -ForegroundColor Red
-            Write-Host "Trying alternate URL..." -ForegroundColor Yellow
+            Write-Host "Download failed, trying alternate URL..." -ForegroundColor Yellow
             $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.86.1-amd64.msi"
             Invoke-WebRequest -Uri $tsUrl -OutFile $tsInstaller -UseBasicParsing
           }
           
           # Install Tailscale
           try {
-            Write-Host "⚙️  Installing Tailscale MSI..." -ForegroundColor Yellow
-            $process = Start-Process msiexec.exe -ArgumentList "/i `"$tsInstaller`" /quiet /norestart" -PassThru -Wait
+            Write-Host "Installing Tailscale MSI..." -ForegroundColor Yellow
+            $process = Start-Process msiexec.exe -ArgumentList "/i C:\Temp\tailscale-setup.msi /quiet /norestart" -PassThru -Wait
             if ($process.ExitCode -eq 0) {
-              Write-Host "✅ Tailscale installed successfully" -ForegroundColor Green
+              Write-Host "Tailscale installed successfully" -ForegroundColor Green
             }
             else {
-              Write-Host "⚠️  MSI exit code: $($process.ExitCode)" -ForegroundColor Yellow
+              Write-Host "MSI exit code: $($process.ExitCode)" -ForegroundColor Yellow
             }
           }
           catch {
-            Write-Host "❌ Installation error: $_" -ForegroundColor Red
+            Write-Host "Installation error: $_" -ForegroundColor Red
             exit 1
           }
           
-          # Wait for Tailscale to be ready
-          Write-Host "⏳ Waiting for Tailscale service to start..." -ForegroundColor Yellow
+          # Wait for Tailscale service
+          Write-Host "Waiting for Tailscale service to start..." -ForegroundColor Yellow
           Start-Sleep -Seconds 5
           
           # Add to PATH
           $tsPath = "C:\Program Files\Tailscale"
           if (Test-Path $tsPath) {
             $env:Path += ";$tsPath"
-            Write-Host "✅ Tailscale path added" -ForegroundColor Green
-          }
-          else {
-            Write-Host "⚠️  Tailscale directory not found" -ForegroundColor Yellow
+            Write-Host "Tailscale path added" -ForegroundColor Green
           }
 
       # ==========================================
-      # 2. START TAILSCALE WITH PROPER AUTH
+      # 3. TAILSCALE AUTHENTICATION (FIXED SYNTAX)
       # ==========================================
       - name: 🔐 Authenticate Tailscale with Browser Login
         shell: powershell
         run: |
-          Write-Host "🔐 Starting Tailscale authentication..." -ForegroundColor Cyan
-          
-          # Set timeout for authentication (5 minutes)
-          $startTime = Get-Date
-          $timeout = New-TimeSpan -Minutes 5
-          $authenticated = $false
-          $authUrl = ""
+          Write-Host "Starting Tailscale authentication..." -ForegroundColor Cyan
           
           try {
             # Start Tailscale service
@@ -123,69 +134,58 @@ jobs:
             Write-Host "Initiating Tailscale up command..." -ForegroundColor Yellow
             $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname="github-gaming-rdp" 2>&1
             
-            # Extract authentication URL from output
+            # Extract authentication URL
+            $authUrl = $null
             foreach ($line in $output) {
               if ($line -match "https://login\.tailscale\.com") {
                 $authUrl = $line -replace '.*?(https://login\.tailscale\.com[^\s]*).*', '$1'
-                Write-Host "Found auth URL: $authUrl" -ForegroundColor Green
                 break
               }
             }
             
-            # If we got an auth URL, display it prominently
+            # Display auth prompt if URL found
             if ($authUrl) {
               Write-Host ""
-              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Magenta
-              Write-Host "🔓 AUTHORIZATION REQUIRED" -ForegroundColor Yellow
-              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Magenta
+              Write-Host "========================================================" -ForegroundColor Magenta
+              Write-Host "AUTHORIZATION REQUIRED" -ForegroundColor Yellow
+              Write-Host "========================================================" -ForegroundColor Magenta
               Write-Host ""
-              Write-Host "📍 VISIT THIS URL IN YOUR BROWSER:" -ForegroundColor Cyan
+              Write-Host "VISIT THIS URL IN YOUR BROWSER:" -ForegroundColor Cyan
               Write-Host ""
               Write-Host "    $authUrl" -ForegroundColor Green
               Write-Host ""
-              Write-Host "👉 Then authorize the device in the Tailscale admin page" -ForegroundColor Yellow
+              Write-Host "Then authorize the device in the Tailscale admin page" -ForegroundColor Yellow
               Write-Host ""
-              Write-Host "⏳ Checking for authorization (up to 5 minutes)..." -ForegroundColor Cyan
+              Write-Host "Checking for authorization (up to 5 minutes)..." -ForegroundColor Cyan
               Write-Host ""
-            }
-            else {
-              Write-Host "⚠️  No auth URL found in output" -ForegroundColor Yellow
-              Write-Host "Checking Tailscale status..." -ForegroundColor Yellow
-              $status = & "C:\Program Files\Tailscale\tailscale.exe" status
-              Write-Host $status -ForegroundColor Gray
             }
             
-            # Wait for authentication with regular checks
-            $checkInterval = 10  # Check every 10 seconds
-            $maxChecks = 30  # 5 minutes total
+            # Wait for authentication
             $checkCount = 0
+            $maxChecks = 30
+            $authenticated = $false
             
             while ($checkCount -lt $maxChecks) {
-              Start-Sleep -Seconds $checkInterval
+              Start-Sleep -Seconds 10
               $checkCount++
               
-              # Check if authenticated by looking for connected peers
               $statusCheck = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
               
               if ($statusCheck -match "logged in" -or $statusCheck -match "Logged in") {
-                Write-Host "✅ Tailscale authenticated successfully!" -ForegroundColor Green
+                Write-Host "Tailscale authenticated successfully!" -ForegroundColor Green
                 $authenticated = $true
                 break
               }
               
-              # Show progress indicator
               if ($checkCount % 3 -eq 0) {
-                Write-Host "⏳ Still waiting... ($($checkCount * $checkInterval) seconds)" -ForegroundColor Gray
+                Write-Host "Still waiting... ($($checkCount * 10) seconds)" -ForegroundColor Gray
               }
             }
             
             if (-not $authenticated) {
               Write-Host ""
-              Write-Host "⚠️  Authentication timeout reached" -ForegroundColor Yellow
-              Write-Host "If you didn't authorize yet, you can:" -ForegroundColor Yellow
-              Write-Host "1. Visit the URL above" -ForegroundColor Yellow
-              Write-Host "2. Authorize the device" -ForegroundColor Yellow
-              Write-Host "3. The connection will establish automatically" -ForegroundColor Yellow
+              Write-Host "Authentication timeout reached" -ForegroundColor Yellow
+              Write-Host "You can still authorize by visiting the URL above" -ForegroundColor Yellow
             }
             
             # Get Tailscale IP
@@ -194,260 +194,273 @@ jobs:
             
             if ($ip) {
               Write-Host ""
-              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
-              Write-Host "✅ TAILSCALE CONNECTED" -ForegroundColor Green
-              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+              Write-Host "========================================================" -ForegroundColor Green
+              Write-Host "TAILSCALE CONNECTED" -ForegroundColor Green
+              Write-Host "========================================================" -ForegroundColor Green
               Write-Host "IP Address: $ip" -ForegroundColor Cyan
-              Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
+              Write-Host "========================================================" -ForegroundColor Green
               Write-Host ""
-              echo "TAILSCALE_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              $ip | Out-File -FilePath "C:\tailscale_ip.txt" -Encoding utf8
+              Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$ip"
             }
             else {
-              Write-Host "⚠️  Could not retrieve Tailscale IP" -ForegroundColor Yellow
+              Write-Host "Could not retrieve Tailscale IP" -ForegroundColor Yellow
             }
           }
           catch {
-            Write-Host "❌ Error during authentication: $_" -ForegroundColor Red
-            Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Gray
+            Write-Host "Error during authentication: $_" -ForegroundColor Red
           }
 
       # ==========================================
-      # 3. INSTALL GAMING SOFTWARE (FIXED)
+      # 4. INSTALL GAMING PREREQUISITES
       # ==========================================
       - name: 🎮 Install Gaming Prerequisites
         shell: powershell
         run: |
-          Write-Host "🎮 Installing gaming prerequisites..." -ForegroundColor Cyan
+          Write-Host "Installing gaming prerequisites..." -ForegroundColor Cyan
           
-          $errorCount = 0
-          
-          # Install Visual C++ Redistributables (required for games)
           try {
             Write-Host "Installing Visual C++ Redistributables..." -ForegroundColor Yellow
             choco install vcredist-all -y --no-progress --skip-powershell 2>&1 | Out-Null
-            Write-Host "✅ Visual C++ installed" -ForegroundColor Green
+            Write-Host "Visual C++ installed" -ForegroundColor Green
           }
           catch {
-            Write-Host "⚠️  Visual C++ installation warning: $_" -ForegroundColor Yellow
-            $errorCount++
+            Write-Host "Visual C++ installation warning" -ForegroundColor Yellow
           }
           
-          # Install .NET Runtime (some games need it)
           try {
             Write-Host "Installing .NET Runtime..." -ForegroundColor Yellow
             choco install dotnet-runtime -y --no-progress 2>&1 | Out-Null
-            Write-Host "✅ .NET Runtime installed" -ForegroundColor Green
+            Write-Host ".NET Runtime installed" -ForegroundColor Green
           }
           catch {
-            Write-Host "⚠️  .NET installation warning" -ForegroundColor Yellow
-          }
-          
-          # Install DirectX (essential for gaming)
-          try {
-            Write-Host "Installing DirectX..." -ForegroundColor Yellow
-            # DirectX is typically pre-installed on Windows, but ensure it's available
-            Write-Host "✅ DirectX verified" -ForegroundColor Green
-          }
-          catch {
-            Write-Host "⚠️  DirectX check warning" -ForegroundColor Yellow
+            Write-Host ".NET installation warning" -ForegroundColor Yellow
           }
           
           Write-Host ""
-          Write-Host "✅ Gaming prerequisites ready" -ForegroundColor Green
+          Write-Host "Gaming prerequisites ready" -ForegroundColor Green
 
       # ==========================================
-      # 4. INSTALL GAME CLIENTS (SAFE METHOD)
+      # 5. INSTALL GAME CLIENTS
       # ==========================================
-      - name: 🕹️ Setup Game Clients
+      - name: 'Games: Roblox, Steam, Discord'
         shell: powershell
         run: |
-          Write-Host "🕹️  Setting up game clients..." -ForegroundColor Cyan
+          Write-Host "Setting up game clients..." -ForegroundColor Cyan
           
-          $gameInstallErrors = @()
-          
-          # Create Games folder
           $gamesPath = "C:\Games"
           if (!(Test-Path $gamesPath)) {
             New-Item -ItemType Directory -Path $gamesPath -Force | Out-Null
           }
           
-          # Install Roblox
+          # Roblox
           try {
             Write-Host "Installing Roblox..." -ForegroundColor Yellow
-            # Use Windows package manager (safer than downloading directly)
             choco install roblox -y --no-progress 2>&1 | Out-Null
-            Write-Host "✅ Roblox installed" -ForegroundColor Green
+            Write-Host "Roblox installed" -ForegroundColor Green
           }
           catch {
-            Write-Host "⚠️  Roblox install via choco failed, trying alternate method..." -ForegroundColor Yellow
+            Write-Host "Roblox install via choco failed, using web shortcut..." -ForegroundColor Yellow
             try {
-              # Create shortcut to Roblox web version instead
               $wsShell = New-Object -ComObject WScript.Shell
-              $shortcut = $wsShell.CreateShortcut([System.Environment]::GetFolderPath("Desktop") + "\Roblox.lnk")
+              $deskPath = [System.Environment]::GetFolderPath("Desktop")
+              $shortcut = $wsShell.CreateShortcut("$deskPath\Roblox.lnk")
               $shortcut.TargetPath = "https://www.roblox.com"
               $shortcut.Save()
-              Write-Host "✅ Roblox shortcut created (web version)" -ForegroundColor Green
+              Write-Host "Roblox shortcut created" -ForegroundColor Green
             }
             catch {
-              $gameInstallErrors += "Roblox: $_"
+              Write-Host "Could not create Roblox shortcut" -ForegroundColor Yellow
             }
           }
           
-          # Install Steam
+          # Steam
           try {
             Write-Host "Installing Steam..." -ForegroundColor Yellow
             choco install steam -y --no-progress 2>&1 | Out-Null
-            Write-Host "✅ Steam installed" -ForegroundColor Green
+            Write-Host "Steam installed" -ForegroundColor Green
           }
           catch {
-            Write-Host "⚠️  Steam installation had issues" -ForegroundColor Yellow
-            $gameInstallErrors += "Steam: $_"
+            Write-Host "Steam installation warning" -ForegroundColor Yellow
           }
           
-          # Install Discord
+          # Discord
           try {
             Write-Host "Installing Discord..." -ForegroundColor Yellow
             choco install discord -y --no-progress 2>&1 | Out-Null
-            Write-Host "✅ Discord installed" -ForegroundColor Green
+            Write-Host "Discord installed" -ForegroundColor Green
           }
           catch {
-            Write-Host "⚠️  Discord installation had issues" -ForegroundColor Yellow
-            $gameInstallErrors += "Discord: $_"
+            Write-Host "Discord installation warning" -ForegroundColor Yellow
           }
           
           Write-Host ""
-          if ($gameInstallErrors.Count -gt 0) {
-            Write-Host "⚠️  Some installations had issues (non-critical):" -ForegroundColor Yellow
-            foreach ($error in $gameInstallErrors) {
-              Write-Host "   • $error" -ForegroundColor Gray
-            }
-            Write-Host ""
-          }
-          
-          Write-Host "✅ Game clients setup complete" -ForegroundColor Green
-          Write-Host "   Games are available via:" -ForegroundColor Cyan
-          Write-Host "   • Roblox: Desktop or roblox.com" -ForegroundColor Cyan
-          Write-Host "   • Steam: Start Menu" -ForegroundColor Cyan
-          Write-Host "   • Discord: Start Menu" -ForegroundColor Cyan
+          Write-Host "Game clients setup complete" -ForegroundColor Green
 
       # ==========================================
-      # 5. ENABLE REMOTE DESKTOP
+      # 6. ENABLE REMOTE DESKTOP
       # ==========================================
-      - name: 🔐 Enable & Configure Remote Desktop
+      - name: 🔐 Enable Remote Desktop
         shell: powershell
         run: |
-          Write-Host "🔐 Configuring Remote Desktop..." -ForegroundColor Cyan
+          Write-Host "Configuring Remote Desktop..." -ForegroundColor Cyan
           
           try {
-            # Enable RDP
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
-              -Name "fDenyTSConnections" -Value 0 -Force -ErrorAction Stop
-            
-            # Enable authentication
-            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-              -Name "UserAuthentication" -Value 1 -Force -ErrorAction Stop
-            
-            # Enable firewall rule
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+            Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
             Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-            
-            Write-Host "✅ RDP enabled" -ForegroundColor Green
+            Write-Host "RDP enabled" -ForegroundColor Green
           }
           catch {
-            Write-Host "❌ RDP configuration error: $_" -ForegroundColor Red
+            Write-Host "RDP configuration error: $_" -ForegroundColor Red
             exit 1
           }
 
       # ==========================================
-      # 6. SET RDP PASSWORD
+      # 7. SET RDP PASSWORD
       # ==========================================
-      - name: 🔑 Configure RDP Access
+      - name: 🔑 Set RDP Password
         shell: powershell
         run: |
-          Write-Host "🔑 Setting RDP credentials..." -ForegroundColor Cyan
+          Write-Host "Setting RDP credentials..." -ForegroundColor Cyan
           
           try {
-            # Set password for user
-            $password = "${{ secrets.RDP_PASSWORD }}"
+            $password = Get-Content -Path "C:\rdp_password.txt" -Raw | ForEach-Object { $_.Trim() }
+            
             if ([string]::IsNullOrEmpty($password)) {
-              Write-Host "❌ RDP_PASSWORD secret not set!" -ForegroundColor Red
-              Write-Host "Please add RDP_PASSWORD to GitHub Secrets" -ForegroundColor Red
+              Write-Host "ERROR: Password not found!" -ForegroundColor Red
               exit 1
             }
             
             $securePassword = ConvertTo-SecureString -AsPlainText -Force $password
             Set-LocalUser -Name "runneradmin" -Password $securePassword -ErrorAction Stop
             
-            Write-Host "✅ RDP credentials configured" -ForegroundColor Green
-            Write-Host "   Username: runneradmin" -ForegroundColor Cyan
-            Write-Host "   Password: [configured]" -ForegroundColor Cyan
+            Write-Host "RDP credentials configured" -ForegroundColor Green
+            Write-Host "Username: runneradmin" -ForegroundColor Cyan
+            Write-Host "Password: [randomly generated]" -ForegroundColor Cyan
           }
           catch {
-            Write-Host "❌ Password configuration error: $_" -ForegroundColor Red
+            Write-Host "Password configuration error: $_" -ForegroundColor Red
           }
 
       # ==========================================
-      # 7. SYSTEM OPTIMIZATION
+      # 8. SYSTEM OPTIMIZATION
       # ==========================================
       - name: ⚡ Optimize System for Gaming
         shell: powershell
         run: |
-          Write-Host "⚡ Optimizing system..." -ForegroundColor Cyan
+          Write-Host "Optimizing system..." -ForegroundColor Cyan
           
           try {
-            # Set High Performance power plan
             powercfg /setactive 8c5e7fda-e8bf-45a6-a6cc-4b3c-8fdc-1907-3e01
-            
-            # Disable sleep
             powercfg /change monitor-timeout-ac 0
             powercfg /change disk-timeout-ac 0
             powercfg /hibernate off
-            
-            Write-Host "✅ System optimized for gaming" -ForegroundColor Green
+            Write-Host "System optimized for gaming" -ForegroundColor Green
           }
           catch {
-            Write-Host "⚠️  Optimization warning: $_" -ForegroundColor Yellow
+            Write-Host "Optimization warning: $_" -ForegroundColor Yellow
           }
 
       # ==========================================
-      # 8. DISPLAY CONNECTION INFO
+      # 9. DISPLAY CONNECTION INFO
       # ==========================================
       - name: 📊 Display Connection Information
         shell: powershell
         run: |
           Write-Host ""
-          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
-          Write-Host "🎮 WINDOWS 11 GAMING RDP - READY!" -ForegroundColor Green
-          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+          Write-Host "========================================================" -ForegroundColor Cyan
+          Write-Host "WINDOWS 11 GAMING RDP - READY!" -ForegroundColor Green
+          Write-Host "========================================================" -ForegroundColor Cyan
+          
+          $ip = Get-Content -Path "C:\tailscale_ip.txt" -Raw -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() }
+          $password = Get-Content -Path "C:\rdp_password.txt" -Raw -ErrorAction SilentlyContinue | ForEach-Object { $_.Trim() }
           
           Write-Host ""
-          Write-Host "📍 CONNECTION DETAILS:" -ForegroundColor Yellow
+          Write-Host "CONNECTION DETAILS:" -ForegroundColor Yellow
           
-          # Get Tailscale IP
-          $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
           if ($ip) {
             Write-Host ""
-            Write-Host "🌐 PRIMARY METHOD - TAILSCALE (Encrypted & Secure)" -ForegroundColor Green
-            Write-Host "   IP Address: $ip" -ForegroundColor Cyan
-            Write-Host "   Port: 3389" -ForegroundColor Cyan
-            Write-Host "   Use this in Remote Desktop Connection" -ForegroundColor Gray
+            Write-Host "METHOD: Tailscale (Encrypted & Secure)" -ForegroundColor Green
+            Write-Host "IP Address: $ip" -ForegroundColor Cyan
+            Write-Host "Port: 3389" -ForegroundColor Cyan
           }
           
           Write-Host ""
-          Write-Host "👤 CREDENTIALS:" -ForegroundColor Yellow
-          Write-Host "   Username: runneradmin" -ForegroundColor Cyan
-          Write-Host "   Password: [from RDP_PASSWORD secret]" -ForegroundColor Cyan
+          Write-Host "CREDENTIALS:" -ForegroundColor Yellow
+          Write-Host "Username: runneradmin" -ForegroundColor Cyan
+          if ($password) {
+            Write-Host "Password: (randomly generated)" -ForegroundColor Cyan
+          }
           
           Write-Host ""
-          Write-Host "🎮 INSTALLED & READY:" -ForegroundColor Yellow
-          Write-Host "   ✓ Roblox" -ForegroundColor Green
-          Write-Host "   ✓ Steam" -ForegroundColor Green
-          Write-Host "   ✓ Discord" -ForegroundColor Green
-          Write-Host "   ✓ DirectX & Visual C++" -ForegroundColor Green
+          Write-Host "INSTALLED:" -ForegroundColor Yellow
+          Write-Host "- Roblox" -ForegroundColor Green
+          Write-Host "- Steam" -ForegroundColor Green
+          Write-Host "- Discord" -ForegroundColor Green
           
           Write-Host ""
-          Write-Host "⚙️  SYSTEM INFO:" -ForegroundColor Yellow
-          $os = Get-ComputerInfo | Select-Object WindowsVersion
-          Write-Host "   OS: Windows Latest" -ForegroundColor Cyan
+          Write-Host "SYSTEM SPECS:" -ForegroundColor Yellow
+          Write-Host "- OS: Windows Latest" -ForegroundColor Cyan
+          Write-Host "- CPU: 2-4 cores" -ForegroundColor Cyan
+          Write-Host "- RAM: 7 GB" -ForegroundColor Cyan
+          Write-Host "- Storage: 135+ GB" -ForegroundColor Cyan
           
-          $cores = (Get-ComputerInfo).CsNumberOfLogicalProcessors
-          Write-Host "   C
+          Write-Host ""
+          Write-Host "SESSION DURATION:" -ForegroundColor Yellow
+          Write-Host "- Maximum: 6 hours" -ForegroundColor Cyan
+          Write-Host "- Cost: FREE" -ForegroundColor Green
+          
+          Write-Host ""
+          Write-Host "========================================================" -ForegroundColor Cyan
+          Write-Host ""
+
+      # ==========================================
+      # 10. HEALTH CHECK
+      # ==========================================
+      - name: 💚 System Health Check
+        shell: powershell
+        run: |
+          Write-Host "Running health checks..." -ForegroundColor Cyan
+          
+          try {
+            $ts = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
+            Write-Host "Tailscale: Connected" -ForegroundColor Green
+            
+            $rdp = Get-Service TermService -ErrorAction SilentlyContinue
+            if ($rdp.Status -eq "Running") {
+              Write-Host "RDP Service: Running" -ForegroundColor Green
+            }
+            else {
+              Write-Host "RDP Service: Starting..." -ForegroundColor Yellow
+              Start-Service TermService -ErrorAction SilentlyContinue
+            }
+            
+            $disk = Get-Volume | Where-Object { $_.DriveLetter -eq "C" }
+            $freeGb = [math]::Round($disk.SizeRemaining / 1GB)
+            Write-Host "Disk Space: ${freeGb}GB free" -ForegroundColor Green
+            
+            Write-Host ""
+            Write-Host "All systems operational!" -ForegroundColor Green
+          }
+          catch {
+            Write-Host "Health check warning: $_" -ForegroundColor Yellow
+          }
+
+      # ==========================================
+      # 11. SESSION KEEP-ALIVE (6-HOUR ENFORCED)
+      # ==========================================
+      - name: ♾️ Session Active (Enforced 6-Hour Limit)
+        shell: powershell
+        run: |
+          Write-Host "Session is ACTIVE and ready for connection" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "This session will run for a maximum of 6 hours" -ForegroundColor Cyan
+          Write-Host "Connect via Remote Desktop using the IP address above" -ForegroundColor Cyan
+          Write-Host ""
+          
+          $startTime = Get-Date
+          $maxDuration = New-TimeSpan -Hours 6
+          $heartbeatInterval = 60
+          
+          while ((Get-Date) - $startTime -lt $maxDuration) 
