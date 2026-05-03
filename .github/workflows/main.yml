@@ -47,28 +47,30 @@ jobs:
           Write-Host "============================================" -ForegroundColor Magenta
           Write-Host ""
           
-          # Try with auth key first (fastest)
-          if ("${{ secrets.TAILSCALE_AUTH_KEY }}" -ne "") {
-            Write-Host "Using pre-configured auth key..." -ForegroundColor Green
-            & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns 2>&1 | Out-Null
-            Start-Sleep -Seconds 2
-            Write-Host "✅ Tailscale authenticated via auth key!" -ForegroundColor Green
-          } else {
-            Write-Host "No auth key found. Starting interactive mode..." -ForegroundColor Yellow
-            & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
-            
-            # Quick check for auth (only 10 seconds max)
-            $maxAttempts = 5
-            for ($i = 0; $i -lt $maxAttempts; $i++) {
-              $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
-              if ($status -match "Active|Logged in") {
-                Write-Host "✅ Device authorized!" -ForegroundColor Green
-                break
-              }
-              if ($i -lt $maxAttempts - 1) {
-                Start-Sleep -Seconds 2
+          try {
+            if ("${{ secrets.TAILSCALE_AUTH_KEY }}" -ne "") {
+              Write-Host "Using pre-configured auth key..." -ForegroundColor Green
+              & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns 2>&1 | Out-Null
+              Start-Sleep -Seconds 2
+              Write-Host "✅ Tailscale authenticated via auth key!" -ForegroundColor Green
+            } else {
+              Write-Host "No auth key found. Starting interactive mode..." -ForegroundColor Yellow
+              & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
+              
+              $maxAttempts = 5
+              for ($i = 0; $i -lt $maxAttempts; $i++) {
+                $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
+                if ($status -match "Active|Logged in") {
+                  Write-Host "✅ Device authorized!" -ForegroundColor Green
+                  break
+                }
+                if ($i -lt $maxAttempts - 1) {
+                  Start-Sleep -Seconds 2
+                }
               }
             }
+          } catch {
+            Write-Host "Tailscale initialization in progress..." -ForegroundColor Yellow
           }
           
           Write-Host "Proceeding with RDP setup..." -ForegroundColor Green
@@ -121,46 +123,30 @@ jobs:
           Write-Host "============================================" -ForegroundColor Cyan
           Write-Host ""
           
-          # Get Tailscale IP with fallback
-          $ip = $null
+          $hostname = $env:COMPUTERNAME
+          $password = $env:RDP_PASS
+          $ip = "Pending"
+          
           try {
-            $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
-            if ([string]::IsNullOrWhiteSpace($ip)) {
-              $ip = "IP pending (check Tailscale admin)"
+            $tailscaleIp = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
+            if ($tailscaleIp -and $tailscaleIp -notmatch "error|Error") {
+              $ip = $tailscaleIp.Trim()
             }
           } catch {
-            $ip = "IP pending (check Tailscale admin)"
+            $ip = "Check Tailscale admin console"
           }
           
-          # Get hostname
-          $hostname = $env:COMPUTERNAME
-          
-          # Display connection details
-          Write-Host "╔════════════════════════════════════════╗" -ForegroundColor Cyan
-          Write-Host "║      RDP CONNECTION DETAILS           ║" -ForegroundColor Cyan
-          Write-Host "╚════════════════════════════════════════╝" -ForegroundColor Cyan
-          Write-Host ""
           Write-Host "Hostname: $hostname" -ForegroundColor Green
           Write-Host "IP Address: $ip" -ForegroundColor Green
           Write-Host "Port: 3389" -ForegroundColor Green
           Write-Host "Username: Administrator" -ForegroundColor Green
-          Write-Host "Password: $env:RDP_PASS" -ForegroundColor Green
+          Write-Host "Password: $password" -ForegroundColor Green
           Write-Host ""
-          Write-Host "Connection String: mstsc /v:$ip:3389" -ForegroundColor Yellow
+          Write-Host "Connection Command: mstsc /v:$ip`:3389" -ForegroundColor Yellow
           Write-Host ""
-          Write-Host "Via Tailscale:" -ForegroundColor Cyan
-          Write-Host "  1. Visit https://login.tailscale.com" -ForegroundColor Gray
-          Write-Host "  2. Find device: $hostname" -ForegroundColor Gray
-          Write-Host "  3. Connect via Tailscale IP: $ip" -ForegroundColor Gray
-          Write-Host ""
-          Write-Host "Games Available: Steam, Discord, Chrome" -ForegroundColor Green
+          Write-Host "Games Available: Steam | Discord | Chrome" -ForegroundColor Green
           Write-Host ""
           Write-Host "============================================" -ForegroundColor Cyan
-          
-          # Save to GitHub output for easy access
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "RDP_IP=$ip"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "RDP_HOST=$hostname"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "RDP_PASS=$env:RDP_PASS"
 
       - name: ♾️ Keep Session Running (6 Hours)
         shell: powershell
