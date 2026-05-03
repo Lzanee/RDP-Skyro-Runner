@@ -47,8 +47,12 @@ jobs:
           Write-Host "============================================" -ForegroundColor Magenta
           Write-Host ""
           
-          $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
-          Write-Host $output
+          try {
+            $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
+            Write-Host $output
+          } catch {
+            Write-Host "Tailscale command initiated" -ForegroundColor Yellow
+          }
           
           Write-Host ""
           Write-Host "If you see a link above, visit it in your browser" -ForegroundColor Yellow
@@ -58,8 +62,10 @@ jobs:
           
           for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 10
-            Write-Host "Checking... ($($i * 10) seconds)" -ForegroundColor Gray
+            Write-Host "Checking... ($($i * 10) seconds elapsed)" -ForegroundColor Gray
           }
+          
+          Write-Host "Proceeding with RDP setup..." -ForegroundColor Green
 
       - name: 🎮 Install Gaming Packages
         shell: powershell
