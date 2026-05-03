@@ -1,4 +1,4 @@
-name: 🎮 Windows 11 RDP - Gaming (ULTRA FIXED)
+name: 🎮 Windows 11 RDP - Gaming (FINAL FIXED)
 
 on:
   workflow_dispatch:
@@ -16,150 +16,177 @@ jobs:
         run: |
           Write-Host "GitHub ToS Compliance" -ForegroundColor Green
           Write-Host "6-hour max runtime enforced" -ForegroundColor Green
-          Write-Host ""
 
       - name: 🔐 Generate Random Password
         shell: powershell
         run: |
-          $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+          $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
           $password = ''
           $random = New-Object Random
           for ($i = 0; $i -lt 12; $i++) {
             $password += $chars[$random.Next($chars.Length)]
           }
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$password"
-          Write-Host "Password generated: $password" -ForegroundColor Green
+          Write-Host "✅ Password generated" -ForegroundColor Green
 
-      - name: 🌐 Install Tailscale
+      - name: 🔥 Disable Windows Defender & Firewall
         shell: powershell
         run: |
-          Write-Host "Installing Tailscale..." -ForegroundColor Cyan
-          choco install tailscale -y --no-progress 2>&1 | Out-Null
-          Write-Host "Tailscale installed" -ForegroundColor Green
-          Start-Sleep -Seconds 3
+          Write-Host "Disabling security for RDP access..." -ForegroundColor Cyan
+          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+          netsh advfirewall set allprofiles state off -ErrorAction SilentlyContinue
+          Write-Host "✅ Security disabled" -ForegroundColor Green
 
-      - name: 🔐 Tailscale Login (Fast Auth)
+      - name: 🔐 Enable RDP Service FIRST
         shell: powershell
         run: |
-          Write-Host ""
-          Write-Host "============================================" -ForegroundColor Magenta
-          Write-Host "TAILSCALE AUTHORIZATION STARTING" -ForegroundColor Yellow
-          Write-Host "============================================" -ForegroundColor Magenta
-          Write-Host ""
+          Write-Host "Enabling RDP service..." -ForegroundColor Cyan
           
-          try {
-            if ("${{ secrets.TAILSCALE_AUTH_KEY }}" -ne "") {
-              Write-Host "Using pre-configured auth key..." -ForegroundColor Green
-              & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns 2>&1 | Out-Null
-              Start-Sleep -Seconds 2
-              Write-Host "✅ Tailscale authenticated via auth key!" -ForegroundColor Green
-            } else {
-              Write-Host "No auth key found. Starting interactive mode..." -ForegroundColor Yellow
-              & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
-              
-              $maxAttempts = 5
-              for ($i = 0; $i -lt $maxAttempts; $i++) {
-                $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
-                if ($status -match "Active|Logged in") {
-                  Write-Host "✅ Device authorized!" -ForegroundColor Green
-                  break
-                }
-                if ($i -lt $maxAttempts - 1) {
-                  Start-Sleep -Seconds 2
-                }
-              }
-            }
-          } catch {
-            Write-Host "Tailscale initialization in progress..." -ForegroundColor Yellow
-          }
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           
-          Write-Host "Proceeding with RDP setup..." -ForegroundColor Green
+          Start-Service -Name "TermService" -ErrorAction SilentlyContinue
+          Start-Service -Name "RemoteRegistry" -ErrorAction SilentlyContinue
+          
+          Get-Service TermService | Wait-Service -Timeout 10
+          Write-Host "✅ RDP service enabled and running" -ForegroundColor Green
 
-      - name: 🔐 Enable RDP
+      - name: 🔑 Create/Update RDP User
         shell: powershell
         run: |
-          Write-Host "Enabling RDP..." -ForegroundColor Cyan
-          
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force -ErrorAction SilentlyContinue
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-          
-          Write-Host "RDP enabled" -ForegroundColor Green
-
-      - name: 🔑 Set RDP Password
-        shell: powershell
-        run: |
-          Write-Host "Setting RDP password..." -ForegroundColor Cyan
+          Write-Host "Setting up RDP user..." -ForegroundColor Cyan
           
           $pass = ConvertTo-SecureString "$env:RDP_PASS" -AsPlainText -Force
           Set-LocalUser -Name "Administrator" -Password $pass -ErrorAction SilentlyContinue
+          Enable-LocalUser -Name "Administrator" -ErrorAction SilentlyContinue
           
-          Write-Host "Username: Administrator" -ForegroundColor Green
-          Write-Host "Password: $env:RDP_PASS" -ForegroundColor Green
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Administrator" -ErrorAction SilentlyContinue
+          
+          Write-Host "✅ RDP user configured" -ForegroundColor Green
 
-      - name: 🎮 Install Gaming Packages
+      - name: 🌐 Install & Configure Tailscale
         shell: powershell
         run: |
-          Write-Host "Installing gaming packages..." -ForegroundColor Cyan
+          Write-Host "Installing Tailscale..." -ForegroundColor Cyan
+          choco install tailscale -y 2>&1 | Out-Null
+          Start-Sleep -Seconds 5
           
-          choco install vcredist-all -y --no-progress 2>&1 | Out-Null
-          Write-Host "Visual C++ OK" -ForegroundColor Green
+          $authKey = "${{ secrets.TAILSCALE_AUTH_KEY }}"
           
-          choco install steam -y --no-progress 2>&1 | Out-Null
-          Write-Host "Steam OK" -ForegroundColor Green
-          
-          choco install discord -y --no-progress 2>&1 | Out-Null
-          Write-Host "Discord OK" -ForegroundColor Green
-          
-          choco install googlechrome -y --no-progress 2>&1 | Out-Null
-          Write-Host "Chrome OK" -ForegroundColor Green
-
-      - name: 📊 Show Connection Info
-        shell: powershell
-        run: |
-          Write-Host ""
-          Write-Host "============================================" -ForegroundColor Cyan
-          Write-Host "GAMING RDP READY!" -ForegroundColor Green
-          Write-Host "============================================" -ForegroundColor Cyan
-          Write-Host ""
-          
-          $hostname = $env:COMPUTERNAME
-          $password = $env:RDP_PASS
-          $ip = "Pending"
-          
-          try {
-            $tailscaleIp = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
-            if ($tailscaleIp -and $tailscaleIp -notmatch "error|Error") {
-              $ip = $tailscaleIp.Trim()
-            }
-          } catch {
-            $ip = "Check Tailscale admin console"
+          if ($authKey -and $authKey -ne "true") {
+            Write-Host "Using auth key..." -ForegroundColor Green
+            & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=gh-rdp-gaming --authkey=$authKey --accept-routes --accept-dns 2>&1 | Out-Null
+          } else {
+            Write-Host "No auth key - manual authorization required" -ForegroundColor Yellow
+            $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=gh-rdp-gaming 2>&1
+            Write-Host $output -ForegroundColor Yellow
           }
           
-          Write-Host "Hostname: $hostname" -ForegroundColor Green
-          Write-Host "IP Address: $ip" -ForegroundColor Green
-          Write-Host "Port: 3389" -ForegroundColor Green
-          Write-Host "Username: Administrator" -ForegroundColor Green
-          Write-Host "Password: $password" -ForegroundColor Green
+          # Wait for Tailscale to actually connect
+          Write-Host "Waiting for Tailscale connection..." -ForegroundColor Cyan
+          $attempts = 0
+          while ($attempts -lt 30) {
+            try {
+              $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
+              if ($status -match "Active|Online" -and $status -notmatch "Offline") {
+                Write-Host "✅ Tailscale connected!" -ForegroundColor Green
+                break
+              }
+            } catch {}
+            
+            Start-Sleep -Seconds 2
+            $attempts++
+            Write-Host "Attempt $attempts/30..." -ForegroundColor Gray
+          }
+
+      - name: 🎮 Install Applications
+        shell: powershell
+        run: |
+          Write-Host "Installing applications..." -ForegroundColor Cyan
+          choco install steam -y 2>&1 | Out-Null
+          choco install discord -y 2>&1 | Out-Null
+          choco install googlechrome -y 2>&1 | Out-Null
+          Write-Host "✅ All apps installed" -ForegroundColor Green
+
+      - name: 📊 Get Connection Details
+        shell: powershell
+        run: |
           Write-Host ""
-          Write-Host "Connection Command: mstsc /v:$ip`:3389" -ForegroundColor Yellow
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+          Write-Host "Retrieving connection details..." -ForegroundColor Yellow
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+          
+          $ip = ""
+          $hostname = $env:COMPUTERNAME
+          $pass = $env:RDP_PASS
+          
+          # Try to get IP with multiple attempts
+          for ($i = 0; $i -lt 15; $i++) {
+            try {
+              $result = & "C:\Program Files\Tailscale\tailscale.exe" ip -4 2>&1
+              if ($result -and $result -notmatch "error|Error") {
+                $ip = $result.Trim()
+                if ($ip -match "^\d+\.\d+\.\d+\.\d+$") {
+                  break
+                }
+              }
+            } catch {}
+            
+            if ($ip -eq "") {
+              Write-Host "Attempt $($i+1)/15 to get IP..." -ForegroundColor Gray
+              Start-Sleep -Seconds 2
+            }
+          }
+          
           Write-Host ""
-          Write-Host "Games Available: Steam | Discord | Chrome" -ForegroundColor Green
+          Write-Host "╔════════════════════════════════════════════╗" -ForegroundColor Cyan
+          Write-Host "║    🎮 RDP SERVER READY FOR CONNECTION 🎮  ║" -ForegroundColor Green
+          Write-Host "╚════════════════════════════════════════════╝" -ForegroundColor Cyan
           Write-Host ""
-          Write-Host "============================================" -ForegroundColor Cyan
+          
+          if ($ip -ne "") {
+            Write-Host "✅ IP Address:     $ip" -ForegroundColor Green
+          } else {
+            Write-Host "⚠️  IP Address:     Check https://login.tailscale.com" -ForegroundColor Yellow
+          }
+          
+          Write-Host "🖥️  Hostname:       $hostname" -ForegroundColor Green
+          Write-Host "🔌 Port:           3389" -ForegroundColor Green
+          Write-Host "👤 Username:       Administrator" -ForegroundColor Green
+          Write-Host "🔐 Password:       $pass" -ForegroundColor Green
+          Write-Host ""
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+          Write-Host "CONNECT WITH:" -ForegroundColor Yellow
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+          Write-Host ""
+          
+          if ($ip -ne "") {
+            Write-Host "Windows: mstsc /v:$ip`:3389" -ForegroundColor Cyan
+            Write-Host "Mac: Open 'Microsoft Remote Desktop' → Add PC → $ip`:3389" -ForegroundColor Cyan
+            Write-Host "Linux: rdesktop -u Administrator -p '$pass' $ip`:3389" -ForegroundColor Cyan
+          } else {
+            Write-Host "1. Go to: https://login.tailscale.com" -ForegroundColor Cyan
+            Write-Host "2. Find device: $hostname" -ForegroundColor Cyan
+            Write-Host "3. Get IP address from there" -ForegroundColor Cyan
+            Write-Host "4. Connect via RDP with that IP" -ForegroundColor Cyan
+          }
+          
+          Write-Host ""
+          Write-Host "INSTALLED: Steam | Discord | Chrome" -ForegroundColor Green
+          Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
+          Write-Host ""
 
       - name: ♾️ Keep Session Running (6 Hours)
         shell: powershell
         run: |
-          Write-Host "Session active - 6 hour maximum" -ForegroundColor Green
-          
+          Write-Host "Session is now LIVE! Connect now." -ForegroundColor Green
           $start = Get-Date
           $max = New-TimeSpan -Hours 6
           
           while ((Get-Date) - $start -lt $max) {
-            Start-Sleep -Seconds 60
             $elapsed = (Get-Date) - $start
-            Write-Host "Running: $($elapsed.Hours)h $($elapsed.Minutes)m" -ForegroundColor Gray
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Session active - $($elapsed.Hours)h $($elapsed.Minutes)m elapsed" -ForegroundColor Gray
+            Start-Sleep -Seconds 60
           }
           
-          Write-Host "6-hour limit reached" -ForegroundColor Yellow
+          Write-Host "Session ended after 6 hours" -ForegroundColor Yellow
