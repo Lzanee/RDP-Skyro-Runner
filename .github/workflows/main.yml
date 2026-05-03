@@ -95,20 +95,6 @@ jobs:
           Write-Host "Username: Administrator" -ForegroundColor Green
           Write-Host "Password: $env:RDP_PASS" -ForegroundColor Green
 
-      - name: ⚡ Optimize System
-        shell: powershell
-        run: |
-          Write-Host "Optimizing system..." -ForegroundColor Cyan
-          
-          # Set High Performance mode (valid GUID)
-          powercfg /setactive 8c5e7fda-e8bf-45a6-a6cc-4b3c37cc803d -ErrorAction SilentlyContinue
-          
-          # Disable sleep
-          powercfg /change monitor-timeout-ac 0 -ErrorAction SilentlyContinue
-          powercfg /change disk-timeout-ac 0 -ErrorAction SilentlyContinue
-          
-          Write-Host "System optimized" -ForegroundColor Green
-
       - name: 🎮 Install Gaming Packages
         shell: powershell
         run: |
@@ -122,6 +108,9 @@ jobs:
           
           choco install discord -y --no-progress 2>&1 | Out-Null
           Write-Host "Discord OK" -ForegroundColor Green
+          
+          choco install googlechrome -y --no-progress 2>&1 | Out-Null
+          Write-Host "Chrome OK" -ForegroundColor Green
 
       - name: 📊 Show Connection Info
         shell: powershell
@@ -164,7 +153,7 @@ jobs:
           Write-Host "  2. Find device: $hostname" -ForegroundColor Gray
           Write-Host "  3. Connect via Tailscale IP: $ip" -ForegroundColor Gray
           Write-Host ""
-          Write-Host "Games Available: Steam, Discord" -ForegroundColor Green
+          Write-Host "Games Available: Steam, Discord, Chrome" -ForegroundColor Green
           Write-Host ""
           Write-Host "============================================" -ForegroundColor Cyan
           
