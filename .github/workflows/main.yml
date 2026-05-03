@@ -38,6 +38,7 @@ jobs:
           Write-Host "Tailscale installed" -ForegroundColor Green
           Start-Sleep -Seconds 5
 
+      
       - name: 🔐 Tailscale Login (Manual Required)
         shell: powershell
         run: |
@@ -47,20 +48,25 @@ jobs:
           Write-Host "============================================" -ForegroundColor Magenta
           Write-Host ""
           
-          try {
-            $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp 2>&1
-            Write-Host $output
-          } catch {
-            Write-Host "Tailscale command initiated" -ForegroundColor Yellow
+          $output = & "C:\Program Files\Tailscale\tailscale.exe" up --hostname=github-gaming-rdp --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} 2>&1
+          Write-Host $output -ForegroundColor Cyan
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Tailscale is starting (authorization may be automatic with auth key)" -ForegroundColor Yellow
           }
           
           Write-Host ""
-          Write-Host "If you see a link above, visit it in your browser" -ForegroundColor Yellow
+          Write-Host "If no auth key is set, visit the link above in your browser" -ForegroundColor Yellow
           Write-Host "Click 'Authorize' to allow this device" -ForegroundColor Yellow
           Write-Host ""
-          Write-Host "Waiting for authorization..." -ForegroundColor Cyan
+          Write-Host "Waiting for device to be authorized..." -ForegroundColor Cyan
           
           for ($i = 0; $i -lt 30; $i++) {
+            $status = & "C:\Program Files\Tailscale\tailscale.exe" status 2>&1
+            if ($status -match "Active") {
+              Write-Host "✅ Device authorized!" -ForegroundColor Green
+              break
+            }
             Start-Sleep -Seconds 10
             Write-Host "Checking... ($($i * 10) seconds elapsed)" -ForegroundColor Gray
           }
