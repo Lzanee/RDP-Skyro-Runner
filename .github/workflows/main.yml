@@ -1,40 +1,95 @@
-name: 🎮 Windows 11 RDP - Gaming (FINAL FIXED)
+name: RDP-Gaming-Roblox-Tailscale
 
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 0 1 * *'
+on: workflow_dispatch
 
 jobs:
-  RDP-Gaming-Setup:
+  build:
     runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
-      - name: ⚖️ Compliance Notice
-        shell: powershell
-        run: |
-          Write-Host "GitHub ToS Compliance" -ForegroundColor Green
-          Write-Host "6-hour max runtime enforced" -ForegroundColor Green
+    - name: Download Tailscale
+      run: |
+        Invoke-WebRequest -Uri "https://tailscale.com/install/windows-x64-msi" -OutFile "tailscale.msi"
+        Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /quiet /norestart" -Wait
 
-      - name: 🔐 Generate Random Password
-        shell: powershell
-        run: |
-          $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
-          $password = ''
-          $random = New-Object Random
-          for ($i = 0; $i -lt 12; $i++) {
-            $password += $chars[$random.Next($chars.Length)]
-          }
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PASS=$password"
-          Write-Host "✅ Password generated" -ForegroundColor Green
+    - name: Start Tailscale and authenticate
+      run: |
+        & "C:\Program Files\Tailscale\tailscale.exe" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns
+      env:
+        TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
 
-      - name: 🔥 Disable Windows Defender & Firewall
-        shell: powershell
-        run: |
-          Write-Host "Disabling security for RDP access..." -ForegroundColor Cyan
-          Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
-          netsh advfirewall set allprofiles state off -ErrorAction SilentlyContinue
+    - name: Get Tailscale IP
+      run: |
+        $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+        Write-Host "TAILSCALE_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Enable RDP
+      run: |
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
+        net user runneradmin "P@ssw0rd123!" /add
+        net localgroup "Remote Desktop Users" runneradmin /add
+        net localgroup "Administrators" runneradmin /add
+
+    - name: Optimize Windows for gaming
+      run: |
+        powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 0
+        Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "UserPreferencesMask" -Value ([byte[]](0x90,0x12,0x03,0x80,0x10,0x00,0x00,0x00))
+
+    - name: Install Chocolatey
+      run: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+    - name: Install gaming dependencies + Chrome
+      run: |
+        choco install vcredist-all -y
+        choco install directx -y
+        choco install webview2 -y
+        choco install googlechrome -y   # <--- Chrome
+
+    - name: Install Roblox
+      run: |
+        $RobloxLauncher = "$env:TEMP\RobloxPlayerLauncher.exe"
+        Invoke-WebRequest -Uri "https://setup.rbxcdn.com/version-da39a3ee5e6b4b0d3255bfef95601890afd80709-RobloxPlayerLauncher.exe" -OutFile $RobloxLauncher
+        Start-Process -FilePath $RobloxLauncher -ArgumentList "/SILENT" -Wait
+        $RobloxExe = "$env:LOCALAPPDATA\Roblox\Versions\RobloxPlayerLauncher.exe"
+        if (Test-Path $RobloxExe) {
+          New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\Desktop\Roblox.lnk" -Target $RobloxExe -Force
+        }
+
+    - name: Setup audio for RDP
+      run: |
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "fDisableAudioCapture" -Value 0
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name "fDisableAudioPlayback" -Value 0
+
+    - name: Create Chrome shortcut on desktop
+      run: |
+        $chromePath = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
+        if (Test-Path $chromePath) {
+          New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\Desktop\Chrome.lnk" -Target $chromePath -Force
+        }
+
+    - name: Show connection info
+      run: |
+        Write-Host "========================================="
+        Write-Host "RDP via Tailscale - Connect using:"
+        Write-Host "IP: ${{ env.TAILSCALE_IP }}"
+        Write-Host "Username: runneradmin"
+        Write-Host "Password: P@ssw0rd123!"
+        Write-Host "Port: 3389 (default RDP port, no need to specify)"
+        Write-Host ""
+        Write-Host "Roblox and Chrome are installed"
+        Write-Host "Desktop shortcuts available"
+        Write-Host "========================================="
+
+    - name: Keep alive
+      run: while ($true) { Start-Sleep -Seconds 300 }          netsh advfirewall set allprofiles state off -ErrorAction SilentlyContinue
           Write-Host "✅ Security disabled" -ForegroundColor Green
 
       - name: 🔐 Enable RDP Service FIRST
