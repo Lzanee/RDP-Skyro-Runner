@@ -1,4 +1,4 @@
-name: RDP-Gaming-Roblox-Tailscale
+name: RDP-Gaming-Roblox-Tailscale-RandomPass
 
 on: workflow_dispatch
 
@@ -8,33 +8,104 @@ jobs:
     timeout-minutes: 360
 
     steps:
+    - name: Generate random password
+      id: genpass
+      run: |
+        Add-Type -AssemblyName System.Web
+        $randomPass = [System.Web.Security.Membership]::GeneratePassword(12, 2)
+        echo "RDP_PASSWORD=$randomPass" | Out-File -FilePath $env:GITHUB_ENV -Append
+        echo "Generated password: $randomPass"
+
     - name: Download Tailscale
       run: |
-        Invoke-WebRequest -Uri "https://tailscale.com/install/windows-x64-msi" -OutFile "tailscale.msi"
-        Start-Process msiexec.exe -ArgumentList "/i tailscale.msi /quiet /norestart" -Wait
+        $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.78.3.exe"
+        Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\tailscale.exe"
 
-    - name: Start Tailscale and authenticate
+    - name: Install Tailscale silently
       run: |
-        & "C:\Program Files\Tailscale\tailscale.exe" up --auth-key ${{ secrets.TAILSCALE_AUTH_KEY }} --accept-routes --accept-dns
+        Start-Process -FilePath "$env:TEMP\tailscale.exe" -ArgumentList "/S /quiet" -Wait -NoNewWindow
+
+    - name: Start Tailscale with auth key
+      run: |
+        $ts = "C:\Program Files\Tailscale\tailscale.exe"
+        if (-not (Test-Path $ts)) { $ts = "C:\Program Files (x86)\Tailscale\tailscale.exe" }
+        & $ts up --auth-key "${{ secrets.TAILSCALE_AUTH_KEY }}" --accept-routes --accept-dns
       env:
         TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
 
     - name: Get Tailscale IP
       run: |
-        $ip = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
-        Write-Host "TAILSCALE_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
+        $ts = "C:\Program Files\Tailscale\tailscale.exe"
+        if (-not (Test-Path $ts)) { $ts = "C:\Program Files (x86)\Tailscale\tailscale.exe" }
+        $ip = & $ts ip -4
+        echo "TAILSCALE_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-    - name: Enable RDP
+    - name: Enable RDP and create user with random password
       run: |
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
-        net user runneradmin "P@ssw0rd123!" /add
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+        netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f
+        net user runneradmin "$env:RDP_PASSWORD" /add
         net localgroup "Remote Desktop Users" runneradmin /add
         net localgroup "Administrators" runneradmin /add
 
     - name: Optimize Windows for gaming
       run: |
+        powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 0 -Force
+
+    - name: Install Chocolatey and dependencies
+      run: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        choco install vcredist-all directx webview2 googlechrome -y
+
+    - name: Install Roblox
+      run: |
+        $launcher = "$env:TEMP\RobloxPlayerLauncher.exe"
+        Invoke-WebRequest -Uri "https://setup.rbxcdn.com/version-da39a3ee5e6b4b0d3255bfef95601890afd80709-RobloxPlayerLauncher.exe" -OutFile $launcher
+        Start-Process -FilePath $launcher -ArgumentList "/SILENT" -Wait
+        $robloxPath = Get-ChildItem "$env:LOCALAPPDATA\Roblox\Versions" -Filter "RobloxPlayerLauncher.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($robloxPath) {
+          $shortcut = "$env:USERPROFILE\Desktop\Roblox.lnk"
+          $WScriptShell = New-Object -ComObject WScript.Shell
+          $lnk = $WScriptShell.CreateShortcut($shortcut)
+          $lnk.TargetPath = $robloxPath.FullName
+          $lnk.Save()
+        }
+
+    - name: Chrome shortcut
+      run: |
+        $chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
+        if (Test-Path $chrome) {
+          $shortcut = "$env:USERPROFILE\Desktop\Chrome.lnk"
+          $WScriptShell = New-Object -ComObject WScript.Shell
+          $lnk = $WScriptShell.CreateShortcut($shortcut)
+          $lnk.TargetPath = $chrome
+          $lnk.Save()
+        }
+
+    - name: Enable audio over RDP
+      run: |
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v fDisableAudioCapture /t REG_DWORD /d 0 /f
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v fDisableAudioPlayback /t REG_DWORD /d 0 /f
+
+    - name: Show connection details
+      run: |
+        Write-Host "========================================="
+        Write-Host "RDP using Tailscale"
+        Write-Host "IP Address: $env:TAILSCALE_IP"
+        Write-Host "Username: runneradmin"
+        Write-Host "Password: $env:RDP_PASSWORD"
+        Write-Host "Port: 3389 (default)"
+        Write-Host ""
+        Write-Host "Roblox + Chrome installed"
+        Write-Host "========================================="
+
+    - name: Keep alive
+      run: while ($true) { Start-Sleep -Seconds 300 }      run: |
         powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
         Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2
         Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" -Name "EnableTransparency" -Value 0
